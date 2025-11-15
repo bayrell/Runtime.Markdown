@@ -1,0 +1,11 @@
+{
+    "name": "Runtime.Markdown",
+    "assets": [
+        "Processor.bay"
+    ],
+    "src": "bay",
+    "dest": {
+        "php": "php",
+        "es6": "es6"
+    }
+}

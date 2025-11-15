@@ -1,0 +1,216 @@
+/*!
+ *  BayLang Technology
+ *
+ *  (c) Copyright 2016-2024 "Ildar Bikmamatov" <support@bayrell.org>
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+namespace Runtime.Markdown;
+
+use Runtime.re;
+use Runtime.BaseObject;
+use Runtime.Component;
+use Runtime.VirtualDom;
+
+
+class Processor extends BaseObject
+{
+	const string HEADER = "header";
+	const string PARAGRAPH = "p";
+	const string LIST = "list";
+	const string CODE = "code";
+	
+	VirtualDom root = null;
+	Vector lines = [];
+	int current_line = 0
+	
+	
+	/**
+	 * Returns current line
+	 */
+	string getLine() => this.lines.get(this.current_line);
+	
+	
+	/**
+	 * Returns true if end of line
+	 */
+	bool isEof() => this.current_line >= this.lines.count();
+	
+	
+	/**
+	 * Returns type by line
+	 */
+	string getType(string line)
+	{
+		string first_char = rs::substr(line, 0, 1);
+		if (first_char == "#") return static::HEADER;
+		else if (first_char == "-") return static::LIST;
+		else if (rs::substr(line, 0, 3) == "```") return static::CODE;
+		line = rs::trim(line);
+		if (rs::strlen(line) > 0) return static::PARAGRAPH;
+		return "";
+	}
+	
+	
+	/**
+	 * Render block paragraph
+	 */
+	void renderParagraph()
+	{
+		string line = this.getLine();
+		VirtualDom p = this.root.element("p");
+		
+		Vector result = re::matchAll("\*\*([^\*]+)\*\*", line);
+		if (result == null)
+		{
+			p.push(line);
+			return;
+		}
+		
+		int last_pos = 0;
+		for (int i=0; i<result.count(); i++)
+		{
+			Vector match = result.get(i);
+			int pos = rs::indexOf(line, match.get(0), last_pos);
+			
+			VirtualDom span = p.element("span");
+			span.push(rs::substr(line, last_pos, pos - last_pos));
+			
+			string content = match.get(1);
+			VirtualDom elem = p.element("b");
+			elem.push(content);
+			
+			last_pos = pos + rs::strlen(match.get(0));
+		}
+		
+		if (last_pos < rs::strlen(line))
+		{
+			VirtualDom span = p.element("span");
+			span.push(rs::substr(line, last_pos));
+		}
+	}
+	
+	
+	/**
+	 * Render header
+	 */
+	void renderHeader()
+	{
+		string line = this.getLine();
+		
+		string elem = "h1";
+		if (rs::substr(line, 0, 2) == "# ")
+		{
+			line = rs::substr(line, 2);
+		}
+		else if (rs::substr(line, 0, 3) == "## ")
+		{
+			elem = "h2";
+			line = rs::substr(line, 3);
+		}
+		else if (rs::substr(line, 0, 4) == "### ")
+		{
+			elem = "h3";
+			line = rs::substr(line, 4);
+		}
+		
+		VirtualDom item = this.root.element(elem);
+		item.push(line);
+	}
+	
+	
+	/**
+	 * Render list
+	 */
+	void renderList()
+	{
+		VirtualDom ul = this.root.element("ul");
+		
+		bool next_list = true;
+		while (next_list and not this.isEof())
+		{
+			string line = rs::trim(this.getLine());
+			if (rs::strlen(line) > 0)
+			{
+				VirtualDom item = ul.element("li");
+				item.push(rs::substr(line, 2));
+			}
+			
+			string next_line = rs::trim(this.lines.get(this.current_line + 1));
+			if (rs::strlen(next_line) > 0 and rs::charAt(next_line, 0) != "-") break;
+			this.current_line++;
+		}
+	}
+	
+	
+	/**
+	 * Render code
+	 */
+	void renderCode()
+	{
+		Vector content = [];
+		
+		this.current_line++;
+		while (not this.isEof())
+		{
+			string line = rs::trim(this.getLine());
+			if (rs::substr(line, 0, 3) == "```") break;
+			content.push(line);
+			this.current_line++;
+		}
+		
+		VirtualDom pre = this.root.element("pre");
+		VirtualDom code = pre.element("code");
+		code.push(rs::join("\n", content));
+	}
+	
+	
+	/**
+	 * Render block
+	 */
+	void render(string block_type)
+	{
+		if (block_type == static::PARAGRAPH) this.renderParagraph();
+		else if (block_type == static::HEADER) this.renderHeader();
+		else if (block_type == static::LIST) this.renderList();
+		else if (block_type == static::CODE) this.renderCode();
+	}
+	
+	
+	/**
+	 * Convert string to VirtualDom
+	 */
+	VirtualDom convert(string content, Component component = null)
+	{
+		this.root = new VirtualDom(component);
+		this.root.name = "div";
+		this.lines = rs::split("\n", content);
+		this.current_line = 0;
+		
+		while (not this.isEof())
+		{
+			string line = this.getLine();
+			string current_type = this.getType(line);
+			
+			if (current_type != "")
+			{
+				this.render(current_type);
+			}
+			
+			this.current_line++;
+		}
+		
+		return this.root;
+	}
+}
