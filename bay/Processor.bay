@@ -68,36 +68,46 @@ class Processor extends BaseObject
 	 */
 	void renderParagraph()
 	{
-		string line = this.getLine();
 		VirtualDom p = this.root.element("p");
-		
-		Vector result = re::matchAll("\*\*([^\*]+)\*\*", line);
-		if (result == null)
+		while (not this.isEof())
 		{
-			p.push(line);
-			return;
-		}
-		
-		int last_pos = 0;
-		for (int i=0; i<result.count(); i++)
-		{
-			Vector match = result.get(i);
-			int pos = rs::indexOf(line, match.get(0), last_pos);
+			string line = this.getLine();
 			
-			VirtualDom span = p.element("span");
-			span.push(rs::substr(line, last_pos, pos - last_pos));
+			Vector result = re::matchAll("\*\*([^\*]+)\*\*", line);
+			if (result == null)
+			{
+				p.push(line);
+			}
+			else
+			{
+				int last_pos = 0;
+				for (int i=0; i<result.count(); i++)
+				{
+					Vector match = result.get(i);
+					int pos = rs::indexOf(line, match.get(0), last_pos);
+					
+					VirtualDom span = p.element("span");
+					span.push(rs::substr(line, last_pos, pos - last_pos));
+					
+					string content = match.get(1);
+					VirtualDom elem = p.element("b");
+					elem.push(content);
+					
+					last_pos = pos + rs::strlen(match.get(0));
+				}
+				
+				if (last_pos < rs::strlen(line))
+				{
+					VirtualDom span = p.element("span");
+					span.push(rs::substr(line, last_pos));
+				}
+			}
 			
-			string content = match.get(1);
-			VirtualDom elem = p.element("b");
-			elem.push(content);
-			
-			last_pos = pos + rs::strlen(match.get(0));
-		}
-		
-		if (last_pos < rs::strlen(line))
-		{
-			VirtualDom span = p.element("span");
-			span.push(rs::substr(line, last_pos));
+			string next_line = rs::trim(this.lines.get(this.current_line + 1, ""));
+			int next_line_type = this.getType(next_line);
+			if (next_line == "" or next_line_type != static::PARAGRAPH) break;
+			p.push(" ");
+			this.current_line++;
 		}
 	}
 	
@@ -137,8 +147,7 @@ class Processor extends BaseObject
 	{
 		VirtualDom ul = this.root.element("ul");
 		
-		bool next_list = true;
-		while (next_list and not this.isEof())
+		while (not this.isEof())
 		{
 			string line = rs::trim(this.getLine());
 			if (rs::strlen(line) > 0)
@@ -147,7 +156,7 @@ class Processor extends BaseObject
 				item.push(rs::substr(line, 2));
 			}
 			
-			string next_line = rs::trim(this.lines.get(this.current_line + 1));
+			string next_line = rs::trim(this.lines.get(this.current_line + 1, ""));
 			if (rs::strlen(next_line) > 0 and rs::charAt(next_line, 0) != "-") break;
 			this.current_line++;
 		}
@@ -164,7 +173,7 @@ class Processor extends BaseObject
 		this.current_line++;
 		while (not this.isEof())
 		{
-			string line = rs::trim(this.getLine());
+			string line = this.getLine();
 			if (rs::substr(line, 0, 3) == "```") break;
 			content.push(line);
 			this.current_line++;
