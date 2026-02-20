@@ -43,24 +43,197 @@ class Processor extends BaseObject
 	
 	
 	/**
+	 * Returns multiline
+	 */
+	string getMultiLine()
+	{
+		Vector<string> lines = [];
+		int pos = this.current_line;
+		while (pos < this.lines.count() and this.lines.get(pos) != "")
+		{
+			string line = this.lines.get(pos);
+			string line_type = this.getType(line);
+			if (line_type != static::PARAGRAPH) break;
+			lines.push(line);
+			pos++;
+		}
+		this.current_line = pos - 1;
+		return rs::join("\n", lines);
+	}
+	
+	
+	/**
 	 * Returns true if end of line
 	 */
 	bool isEof() => this.current_line >= this.lines.count();
 	
 	
 	/**
-	 * Returns type by line
+	 * Returns assets
 	 */
-	string getType(string line)
+	string assets(string path) => path;
+	
+		
+	/**
+	 * Parse elem
+	 */
+	void parse(string line, string match, fn f)
 	{
-		string first_char = rs::substr(line, 0, 1);
-		if (first_char == "#") return static::HEADER;
-		else if (first_char == "-") return static::LIST;
-		else if (rs::substr(line, 0, 3) == "```") return static::CODE;
-		line = rs::trim(line);
-		if (rs::strlen(line) > 0) return static::PARAGRAPH;
-		return "";
+		Vector result = re::matchAll(match, line, "s");
+		if (result == null)
+		{
+			if (line) f(line, false);
+		}
+		else
+		{
+			int last_pos = 0;
+			for (int i=0; i<result.count(); i++)
+			{
+				Vector arr = result.get(i);
+				int pos = rs::indexOf(line, arr.get(0), last_pos);
+				f(rs::substr(line, last_pos, pos - last_pos), arr);
+				last_pos = pos + rs::strlen(arr.get(0));
+			}
+			
+			if (last_pos < rs::strlen(line))
+			{
+				string next_line = rs::substr(line, last_pos);
+				if (next_line) f(next_line, true);
+			}
+		}
 	}
+	
+	
+	/**
+	 * Render bold
+	 */
+	void renderBold(VirtualDom elem, string line)
+	{
+		if (line == "") return;
+		
+		this.parse(line, "\*\*([^\*]+)\*\*", void (string prev_line, var match){
+			
+			elem.push(prev_line);
+			
+			if (match instanceof Vector)
+			{
+				string content = match.get(1);
+				VirtualDom item = elem.element("b");
+				item.push(content);
+			}
+		});
+	}
+	
+	
+	/**
+	 * Render image
+	 */
+	void renderImage(VirtualDom elem, string line)
+	{
+		if (line == "") return;
+		
+		this.parse(line, "(\!\[(.*)\])\(([^\)]+)\)", void (string prev_line, var match){
+			
+			this.renderBold(elem, prev_line);
+			
+			if (match instanceof Vector)
+			{
+				string name = match.get(2);
+				string link = match.get(3);
+				VirtualDom item = elem.element("img");
+				item.attrs.set("alt", name);
+				item.attrs.set("src", this.assets(link));
+			}
+		});
+	}
+	
+	
+	/**
+	 * Render link
+	 */
+	void renderLink(VirtualDom elem, string line)
+	{
+		if (line == "") return;
+		
+		this.parse(line, "(\[(.*)\])\(([^\)]+)\)", void (string prev_line, var match){
+			
+			this.renderImage(elem, prev_line);
+			
+			if (match instanceof Vector)
+			{
+				string name = match.get(2);
+				string link = match.get(3);
+				VirtualDom item = elem.element("a");
+				item.attrs.set("href", link);
+				this.renderImage(item, name);
+			}
+		});
+	}
+	
+	
+	/**
+	 * Parse attrs
+	 */
+	Map parseAttrs(string line)
+	{
+		line = rs::trim(line);
+		
+		Map result = {};
+		Vector match = re::matchAll("([a-z0-9\-]+)=\"([^\"]+)\"", line);
+		if (match)
+		{
+			for (int i=0; i<match.count(); i++)
+			{
+				Vector arr = match.get(i);
+				string key = arr.get(1);
+				string value = arr.get(2);
+				result.set(key, value);
+			}
+		}
+		
+		return result;
+	}
+	
+	
+	/**
+	 * Process HTML item
+	 */
+	void htmlItem(VirtualDom item)
+	{
+	}
+	
+	
+	/**
+	 * Render html
+	 */
+	void renderHtml(VirtualDom elem, string line, bool is_html = false)
+	{
+		if (line == "") return;
+		
+		this.parse(line, "\<([a-z]+)([^\>]*)\>(.*)\<\/[a-z]*\>", void (string prev_line, var match){
+			
+			if (is_html) elem.push(prev_line);
+			else this.renderLink(elem, prev_line);
+			
+			if (match instanceof Vector)
+			{
+				string tag_name = match.get(1);
+				string attrs = match.get(2);
+				string content = match.get(3);
+				
+				VirtualDom item = elem.element(tag_name);
+				item.attrs = this.parseAttrs(attrs);
+				this.htmlItem(item);
+				this.renderHtml(item, content, true);
+			}
+		});
+	}
+	
+	
+	/**
+	 * Returns true if item is block
+	 */
+	bool isBlock(VirtualDom item) => item.name == "center" or item.name == "div";
 	
 	
 	/**
@@ -68,46 +241,27 @@ class Processor extends BaseObject
 	 */
 	void renderParagraph()
 	{
-		VirtualDom p = this.root.element("p");
-		while (not this.isEof())
+		string line = this.getMultiLine();
+		
+		VirtualDom elem = new VirtualDom();
+		this.renderHtml(elem, line);
+		
+		if (elem.items.count() == 0) return;
+		
+		VirtualDom last = null;
+		for (int i=0; i<elem.items.count(); i++)
 		{
-			string line = this.getLine();
-			
-			Vector result = re::matchAll("\*\*([^\*]+)\*\*", line);
-			if (result == null)
+			VirtualDom item = elem.items.get(i);
+			if (not rtl::isString(item) and this.isBlock(item))
 			{
-				p.push(line);
+				this.root.push(item);
+				last = null;
 			}
 			else
 			{
-				int last_pos = 0;
-				for (int i=0; i<result.count(); i++)
-				{
-					Vector match = result.get(i);
-					int pos = rs::indexOf(line, match.get(0), last_pos);
-					
-					VirtualDom span = p.element("span");
-					span.push(rs::substr(line, last_pos, pos - last_pos));
-					
-					string content = match.get(1);
-					VirtualDom elem = p.element("b");
-					elem.push(content);
-					
-					last_pos = pos + rs::strlen(match.get(0));
-				}
-				
-				if (last_pos < rs::strlen(line))
-				{
-					VirtualDom span = p.element("span");
-					span.push(rs::substr(line, last_pos));
-				}
+				if (last == null) last = this.root.element("p");
+				last.push(item);
 			}
-			
-			string next_line = rs::trim(this.lines.get(this.current_line + 1, ""));
-			int next_line_type = this.getType(next_line);
-			if (next_line == "" or next_line_type != static::PARAGRAPH) break;
-			p.push(" ");
-			this.current_line++;
 		}
 	}
 	
@@ -143,9 +297,9 @@ class Processor extends BaseObject
 	/**
 	 * Render list
 	 */
-	void renderList()
+	void renderList(VirtualDom root, int level = 0)
 	{
-		VirtualDom ul = this.root.element("ul");
+		VirtualDom ul = root.element("ul");
 		
 		while (not this.isEof())
 		{
@@ -153,12 +307,24 @@ class Processor extends BaseObject
 			if (rs::strlen(line) > 0)
 			{
 				VirtualDom item = ul.element("li");
-				item.push(rs::substr(line, 2));
+				this.renderHtml(item, rs::substr(line, 2));
 			}
 			
-			string next_line = rs::trim(this.lines.get(this.current_line + 1, ""));
-			if (rs::strlen(next_line) > 0 and rs::charAt(next_line, 0) != "-") break;
+			string next_line = this.lines.get(this.current_line + 1, "");
+			string trim_line = rs::trim(next_line);
+			if (rs::strlen(next_line) > 0 and rs::charAt(trim_line, 0) != "-") break;
+			
+			/* Get level */
+			int next_level = 0, len = rs::strlen(next_line);
+			while (next_level < len and rs::charAt(next_line, next_level) == " ") next_level++;
+			
+			if (next_level < level) break;
+			
 			this.current_line++;
+			if (next_level > level)
+			{
+				this.renderList(ul, next_level);
+			}
 		}
 	}
 	
@@ -186,13 +352,28 @@ class Processor extends BaseObject
 	
 	
 	/**
+	 * Returns type by line
+	 */
+	string getType(string line)
+	{
+		string first_char = rs::substr(line, 0, 1);
+		if (first_char == "#") return static::HEADER;
+		else if (first_char == "-") return static::LIST;
+		else if (rs::substr(line, 0, 3) == "```") return static::CODE;
+		line = rs::trim(line);
+		if (rs::strlen(line) > 0) return static::PARAGRAPH;
+		return "";
+	}
+	
+	
+	/**
 	 * Render block
 	 */
 	void render(string block_type)
 	{
 		if (block_type == static::PARAGRAPH) this.renderParagraph();
 		else if (block_type == static::HEADER) this.renderHeader();
-		else if (block_type == static::LIST) this.renderList();
+		else if (block_type == static::LIST) this.renderList(this.root);
 		else if (block_type == static::CODE) this.renderCode();
 	}
 	
