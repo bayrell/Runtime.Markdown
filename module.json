@@ -3,9 +3,13 @@
     "assets": [
         "Processor.bay"
     ],
+    "groups": [
+        "runtime"
+    ],
     "src": "bay",
     "dest": {
         "php": "php",
-        "es6": "es6"
+        "es6": "es6",
+        "nodejs": "nodejs"
     }
 }

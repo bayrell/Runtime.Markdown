@@ -1,2 +1,4 @@
 es6
 php
+nodejs/*
+!nodejs/index.js
